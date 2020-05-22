@@ -2,6 +2,7 @@
 #define UTILS_H_
 
 #include <string>
+#include <mpi.h>
 
 #include "camd.h"
 #include "cholmod.h"
@@ -20,10 +21,16 @@ void add_tri_entryd(cholmod_triplet* T, int r, int c, double x);
 void verification(cholmod_sparse* A, cholmod_common* cp, int* P);
 
 // checks if A through P has the same # of reduced nnz as X
-bool check(cholmod_sparse* A, cholmod_common* cp, int* P, int x);
+bool check(cholmod_sparse* A, cholmod_common* cp, int* P, int x, int log_level=0);
 
 int* test_parl(cholmod_sparse* A, cholmod_common* cp);
 
 void output_file(int* P, int n);
+
+/*
+When first called, record the current time and return 0;
+when called again, return the max difference in time.
+*/
+double time_toggle(MPI_Comm comm);
 
 #endif

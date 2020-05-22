@@ -1,5 +1,3 @@
-#include <string>
-
 #include "utils.h"
 
 int nnz_amd(cholmod_sparse* A, cholmod_common* cp, int* P, int* Parent,
@@ -78,7 +76,8 @@ void verification(cholmod_sparse* A, cholmod_common* cp, int* P)
     cp->method[0].ordering = CHOLMOD_METIS;
     cholmod_analyze(A, cp);
     // printf ("The metis nz: %lf\n", cp->method[0].lnz) ;
-    printf("%d %d %lf %d %d\n", (int)A->ncol, (int)A_nnz, cp->method[0].lnz,
+    puts("ncol  nnz  metis  amd  ours");
+    printf("%d %d %.2lf %d %d\n", (int)A->ncol, (int)A_nnz, cp->method[0].lnz,
         nnz_amd(A, cp, P_tmp, Parent, Post, ColCount, First, Level),
         (int)(nnz));
 
@@ -92,7 +91,7 @@ void verification(cholmod_sparse* A, cholmod_common* cp, int* P)
     return;
 }
 
-bool check(cholmod_sparse* A, cholmod_common* cp, int* P, int x)
+bool check(cholmod_sparse* A, cholmod_common* cp, int* P, int x, int log_level)
 {
     int A_nnz = cholmod_nnz(A, cp);
 
@@ -109,8 +108,10 @@ bool check(cholmod_sparse* A, cholmod_common* cp, int* P, int x)
     for (int i = 0; i < (int)A->nrow; ++i) {
         nnz += ColCount[i];
     }
-    printf("The ver fill-in: %d\n", nnz - A_nnz);
-    printf("The xxx fill-in: %d\n", x);
+    if (log_level == 2) {
+        printf("The ver fill-in: %d\n", nnz - A_nnz);
+        printf("The xxx fill-in: %d\n", x);
+    }
 
     delete[] P_tmp;
     delete[] Parent;
@@ -190,4 +191,24 @@ void output_file(int* P, int n)
 
     fclose(fp);
     return;
+}
+
+/*
+When first called, record the current time and return 0;
+when called again, return the max difference in time.
+*/
+double time_toggle(MPI_Comm comm) {
+	static bool status = true;
+	static double local_start;
+	double elapsed;
+	if (status) {
+		MPI_Barrier(comm);
+		local_start = MPI_Wtime();
+		elapsed = .0;
+	} else {
+		double local_elapsed = MPI_Wtime() - local_start;
+		MPI_Reduce(&local_elapsed, &elapsed, 1, MPI_DOUBLE, MPI_MAX, 0, comm);
+	}
+	status = !status;
+	return elapsed;
 }

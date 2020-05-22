@@ -1,8 +1,10 @@
+#include <omp.h>
+#include <mpi.h>
 
 #include "utils.h"
 #include "search.h"
 
-int* A_star_amd(cholmod_sparse* A, cholmod_common* cp, int w, int Nnum)
+int* A_star_amd(cholmod_sparse* A, cholmod_common* cp, int w, int Nnum, int log_level)
 {
     int* P = new int[A->nrow];
     int* f_cost_array = new int[A->nrow]; // g(x)
@@ -25,7 +27,6 @@ int* A_star_amd(cholmod_sparse* A, cholmod_common* cp, int w, int Nnum)
 
     // TODO: apply multiple amd recommendations
     for (int i = 0; i < (int)A->nrow - 1; ++i) { // run for nrow-1 times!
-        printf("i=%d\n", i);
         /*FILE* fp = fopen (std::string("out/Matrix_" + std::to_string(i) +
         ".txt").c_str(), "w") ; if (!fp) { puts ("fail to write!") ;
         }
@@ -36,7 +37,8 @@ int* A_star_amd(cholmod_sparse* A, cholmod_common* cp, int w, int Nnum)
         }
         fclose (fp) ;*/
         int S_nnz = cholmod_nnz(S, cp);
-        printf("S_nnz: %d\nf_score: %d\n", S_nnz, f_cost_array[i]);
+        if (log_level)
+            printf("i: %5d S_nnz: %7d f_score: %7d\n", i, S_nnz, f_cost_array[i]);
         int full = (S->nrow - i) * (S->nrow - i + 1) / 2;
 
         if (S_nnz == full) {
@@ -86,7 +88,8 @@ int* A_star_amd(cholmod_sparse* A, cholmod_common* cp, int w, int Nnum)
             // cholmod_print_sparse (F, "F1", cp) ;
             int F_nnz = cholmod_nnz(F, &c);
 
-            printf("%d: %d\n", j - i, f_cost_array[j]);
+            // if (log_level == 2)
+            //     printf("%d: %d\n", j - i, f_cost_array[j]);
             // F does not contain column[lid]
             // so we need to add the #nnz of column[lid] to f[j]
             // for a fair comparison
@@ -95,7 +98,8 @@ int* A_star_amd(cholmod_sparse* A, cholmod_common* cp, int w, int Nnum)
             } else {
                 f_cost_array[j] += (F_nnz - S_nnz + adj_size);
             }
-            printf("%d: %d\n", j - i, f_cost_array[j]);
+            if (log_level == 2)
+                printf("%d: %d\n", j - i, f_cost_array[j]);
             g_cost_array[j] = fill_in_amd(F, &c, P_tmp, Parent, Post, ColCount, First,
                 Level, F_nnz);
             // printf ("g_cost_array: %d\n", g_cost_array[j]) ;
@@ -122,15 +126,17 @@ int* A_star_amd(cholmod_sparse* A, cholmod_common* cp, int w, int Nnum)
                 continue;
             }
             int j = part_j[jj];
-            printf("min_cost: %d, j-cost: %d\n", min_cost,
+            if (log_level == 2)
+                printf("min_cost: %d, j-cost: %d\n", min_cost,
                 (w * f_cost_array[j] + g_cost_array[j]));
             if (min_cost > (w * f_cost_array[j] + g_cost_array[j])) {
                 min_idx = j;
                 min_cost = w * f_cost_array[j] + g_cost_array[j];
             }
         }
-        printf("f_score: %d, g_score: %d\n", (int)f_cost_array[min_idx],
-            (int)g_cost_array[min_idx]);
+        if (log_level)
+            printf("f_score: %d, g_score: %d\n", (int)f_cost_array[min_idx],
+                (int)g_cost_array[min_idx]);
 
         for (int k = min_idx; k > i; --k) {
             swap_P(k - 1, k, P);
@@ -167,27 +173,27 @@ int* A_star_amd(cholmod_sparse* A, cholmod_common* cp, int w, int Nnum)
         if (min_res > min_cost) {
             min_res = min_cost;
         }
-        if (!check(A, cp, P_opt, min_cost)) {
-            for (int k = 0; k < adj_size; ++k) {
-                printf("%d ", adjacants[k]);
+        if (!check(A, cp, P_opt, min_cost, log_level)) {
+            if (log_level == 1) {
+                for (int k = 0; k < adj_size; ++k) {
+                    printf("%d ", adjacants[k]);
+                }
+                puts("");
+                printf("lid: %d\n", lid);
+                printf("F_nnz: %d\n", cholmod_nnz(S, cp));
+                puts("dump last matrix");
             }
-            puts("");
-            printf("lid: %d\n", lid);
-            printf("F_nnz: %d\n", cholmod_nnz(S, cp));
-            puts("dump last matrix");
             FILE* fp = fopen(
                 std::string("out/Matrix_" + std::to_string(i + 1) + ".txt").c_str(),
                 "w");
-            if (!fp) {
-                puts("fail to write!");
-            }
+            if (!fp) { puts("fail to write!"); }
             for (int u = 0; u < (int)S->ncol; ++u) {
                 for (int v = ((int*)S->p)[u]; v < ((int*)S->p)[u + 1]; ++v) {
                     fprintf(fp, "%d %d 1\n", ((int*)S->i)[v], u);
                 }
             }
             fclose(fp);
-            exit(1);
+            return nullptr;
         }
 
         delete[] adjacants;
@@ -205,9 +211,18 @@ int* A_star_amd(cholmod_sparse* A, cholmod_common* cp, int w, int Nnum)
     return P;
 }
 
+int* A_star_amd_mpi(cholmod_sparse* A, cholmod_common* cp, int w, int Nnum)
+{
+
+    return nullptr;
+
+}
+
+
 void A_star_free_all(cholmod_sparse* A, cholmod_common* cp, int* P)
 {
-    delete[] P;
+    if (P != nullptr)
+        delete[] P;
     cholmod_free_sparse(&A, cp);
     cholmod_finish(cp); /* finish CHOLMOD */
 
@@ -215,7 +230,7 @@ void A_star_free_all(cholmod_sparse* A, cholmod_common* cp, int* P)
 }
 
 cholmod_sparse* eliminate_node(cholmod_sparse* S, cholmod_common* cp, int lid, int S_nnz,
-                    int* adjacants, int& adj_size, bool* diag, int log_level)
+                    int* adjacants, int& adj_size, bool* diag, int log_level=0)
 {
     //int lid = j - i; // row to use for elimination in current S
     // discover adjacants in S
@@ -303,7 +318,7 @@ cholmod_sparse* eliminate_node(cholmod_sparse* S, cholmod_common* cp, int lid, i
     return F;
 }
 
-void swap_P(int idx1, int idx2, int* P)
+inline void swap_P(int idx1, int idx2, int* P)
 {
     int tmp = P[idx1];
     P[idx1] = P[idx2];

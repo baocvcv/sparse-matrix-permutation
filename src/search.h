@@ -6,7 +6,10 @@
 
 // perform A* using amd as heuristic
 //TODO: add "step"
-int* A_star_amd(cholmod_sparse* A, cholmod_common* cp, int w, int Nnum);
+int* A_star_amd(cholmod_sparse* A, cholmod_common* cp, int w, int Nnum, int log_level=0);
+
+// perform A_start_amd with mpi
+int* A_star_amd_mpi(cholmod_sparse* A, cholmod_common* cp, int w, int Nnum);
 
 // release memory
 void A_star_free_all(cholmod_sparse* A, cholmod_common* cp, int* P);

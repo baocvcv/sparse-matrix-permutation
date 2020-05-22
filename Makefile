@@ -2,7 +2,7 @@
 TARGET := OPT_PERM
 
 # Options
-CC := g++
+CC := $(if $(shell command -v mpiicpc), mpiicpc, mpic++)
 CC_FLAG := -std=c++11 -O3 -Wall -Wno-unused-result -fopenmp -pthread
 CC_OBJ_FLAG := $(CCFLAG) -c
 DBG_FLAG := -DDEBUG
@@ -11,6 +11,7 @@ LIB := -lcholmod \
       -lcamd -lamd -lmetis -lrt -lopenblas
 LIB_DIR := #-L/home/yangming/Lib -lopenblas
 INC_DIR := #-I./include -I/home/yangming/Include
+RUN_CMD := $(if $(shell command -v srun), srun, mpiexec)
 
 # Files
 DBG_SUFFIX := _dbg
@@ -43,3 +44,11 @@ debug: bin/$(TARGET_DBG)
 .PHONY: clean
 clean:
 	rm -f obj/*.o bin/$(TARGET) bin/$(TARGET_DBG)
+
+.PHONY: run
+run: bin/$(TARGET)
+	$(RUN_CMD) -n $(N) bin/$(TARGET) -f cases/1138_bus.mtx -n $(n) -s $(s)
+
+.PHONY: run_d
+run_d: bin/$(TARGET)
+	$(RUN_CMD) -n $(N) bin/$(TARGET) -f cases/1138_bus.mtx -n 8 -s 1
