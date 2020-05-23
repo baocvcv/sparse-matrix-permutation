@@ -1,6 +1,8 @@
 #ifndef SEARCH_H_
 #define SEARCH_H_
 
+#include <memory>
+
 #include "camd.h"
 #include "cholmod.h"
 
@@ -9,7 +11,8 @@
 int* A_star_amd(cholmod_sparse* A, cholmod_common* cp, int w, int Nnum, int log_level=0);
 
 // perform A_start_amd with mpi
-int* A_star_amd_mpi(cholmod_sparse* A, cholmod_common* cp, int w, int Nnum);
+void mpi_A_star_amd(int pid, int nproc, cholmod_sparse* A, cholmod_common* cp,
+                    int w, int Nnum, std::unique_ptr<int[]>& P_result, int log_level=0);
 
 // release memory
 void A_star_free_all(cholmod_sparse* A, cholmod_common* cp, int* P);

@@ -20,7 +20,7 @@ void add_tri_entryd(cholmod_triplet* T, int r, int c, double x);
 // P: the ordering of columns
 void verification(cholmod_sparse* A, cholmod_common* cp, int* P);
 
-// checks if A through P has the same # of reduced nnz as X
+// checks if A through P has the same # of reduced nnz as x
 bool check(cholmod_sparse* A, cholmod_common* cp, int* P, int x, int log_level=0);
 
 int* test_parl(cholmod_sparse* A, cholmod_common* cp);
