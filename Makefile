@@ -36,19 +36,25 @@ obj/%$(DBG_SUFFIX).o: src/%.cpp
 
 # Phony
 .PHONY: all
-all: bin/$(TARGET)
+all: mkdirs bin/$(TARGET)
 
 .PHONY: debug
-debug: bin/$(TARGET_DBG)
+debug: mkdirs bin/$(TARGET_DBG)
 
 .PHONY: clean
 clean:
 	rm -f obj/*.o bin/$(TARGET) bin/$(TARGET_DBG)
 
 .PHONY: run
-run: bin/$(TARGET)
+run: mkdirs bin/$(TARGET)
 	$(RUN_CMD) -n $(N) bin/$(TARGET) -f cases/1138_bus.mtx -n $(n) -s $(s)
 
 .PHONY: run_d
-run_d: bin/$(TARGET)
+run_d: mkdirs bin/$(TARGET)
 	$(RUN_CMD) -n $(N) bin/$(TARGET) -f cases/1138_bus.mtx -n 8 -s 1
+
+.PHONY: mkdirs
+mkdirs:
+	@mkdir -p bin
+	@mkdir -p out
+	@mkdir -p obj
