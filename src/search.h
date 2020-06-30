@@ -6,15 +6,35 @@
 #include "camd.h"
 #include "cholmod.h"
 
-// perform A* using amd as heuristic
+// 
 //TODO: add "step"
-int* A_star_amd(cholmod_sparse* A, cholmod_common* cp, int w, int Nnum, int log_level=0);
+/**
+ * Perform A* search using amd as heuristic.
+ * 
+ * @param w f(x) = g(x) + w * h(x)
+ * @param Nnum The no. of children evaluated at each node
+ * @param log_level 0-no log, 1-info, 2-debug
+ */
+int* A_star_amd(cholmod_sparse* A, cholmod_common* cp,
+                int w, int Nnum, int log_level=0);
 
-// perform A_start_amd with mpi
+/**
+ * Perform A_star_amd with mpi
+ * 
+ * @param pid Process rank
+ * @param nproc #processes
+ * @param P_result Out : Stores the elmination sequence
+ * @param w f(x) = g(x) + w * h(x)
+ * @param Nnum The no. of children evaluated at each node
+ * @param step After selecting the best children, the algorithm
+ * performs the elmination indicated by the child, along with 
+ * #(step-1) elminations suggested by the AMD algorithm.
+ */
 void mpi_A_star_amd(int pid, int nproc, cholmod_sparse* A, cholmod_common* cp,
-                    int w, int Nnum, std::unique_ptr<int[]>& P_result, int log_level=0);
+                    std::unique_ptr<int[]>& P_result,
+                    int w, int Nnum, int step=1, int log_level=0);
 
-// release memory
+/** Frees memory used by A_start_amd */
 void A_star_free_all(cholmod_sparse* A, cholmod_common* cp, int* P);
 
 /*
@@ -31,6 +51,7 @@ void A_star_free_all(cholmod_sparse* A, cholmod_common* cp, int* P);
 cholmod_sparse* eliminate_node(cholmod_sparse* S, cholmod_common* cp, int col, int S_nnz,
                     int* adjacants, int& adj_size, bool* diag, int log_level);
 
+/** Swaps P[idx1] and P[idx2] */
 void swap_P(int idx1, int idx2, int* P);
 
 #endif

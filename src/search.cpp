@@ -188,7 +188,7 @@ int* A_star_amd(cholmod_sparse* A, cholmod_common* cp, int w, int Nnum, int log_
                 }
                 puts("");
                 printf("lid: %d\n", lid);
-                printf("F_nnz: %d\n", cholmod_nnz(S, cp));
+                printf("F_nnz: %ld\n", cholmod_nnz(S, cp));
                 puts("dump last matrix");
             }
             FILE* fp = fopen(
@@ -222,8 +222,8 @@ int* A_star_amd(cholmod_sparse* A, cholmod_common* cp, int w, int Nnum, int log_
 bool mpi_all_agree (std::unique_ptr<int[]>& t, int len, int pid)
 {
     if (pid == 0) {
-        auto t_min = std::make_unique<int[]>(len);
-        auto t_max = std::make_unique<int[]>(len);
+        std::unique_ptr<int[]> t_min(new int[len]);
+        std::unique_ptr<int[]> t_max(new int[len]);
         MPI_Reduce(t.get(), t_min.get(), len, MPI_INT, MPI_MIN, 0, MPI_COMM_WORLD);
         MPI_Reduce(t.get(), t_max.get(), len, MPI_INT, MPI_MAX, 0, MPI_COMM_WORLD);
         for (int i = 0; i < len; i++) {
@@ -260,7 +260,8 @@ void cs_min (void *in, void *inout, int *len, MPI_Datatype *d_type)
 }
 
 void mpi_A_star_amd(int pid, int nproc, cholmod_sparse* A, cholmod_common* cp,
-                    int w, int Nnum, std::unique_ptr<int[]>& P_result, int log_level)
+                    std::unique_ptr<int[]>& P_result,
+                    int w, int Nnum, int step, int log_level)
 {
     // custom op and datatype used later in reduction
     MPI_Op myOp;
@@ -269,20 +270,29 @@ void mpi_A_star_amd(int pid, int nproc, cholmod_sparse* A, cholmod_common* cp,
     MPI_Type_commit(&myType);
     MPI_Op_create(cs_min, true, &myOp);
 
-    // each process maintains its own cost_array
     // int* P = new int[A->nrow];
     // int* f_cost_array = new int[A->nrow]; // g(x)
     // int* g_cost_array = new int[A->nrow]; // h(x)
     // int* part_j = new int[Nnum];
     // bool* non_min = new bool[Nnum];
 
-    auto P = std::make_unique<int[]>(A->nrow);
-    auto f_cost_array = std::make_unique<int[]>(A->nrow);
-    auto g_cost_array = std::make_unique<int[]>(A->nrow);
-    auto part_j = std::make_unique<int[]>(Nnum);
-    auto non_min = std::make_unique<bool[]>(Nnum);
+    // auto P = std::make_unique<int[]>(A->nrow);
+    // auto f_cost_array = std::make_unique<int[]>(A->nrow);
+    // auto g_cost_array = std::make_unique<int[]>(A->nrow);
+    // auto part_j = std::make_unique<int[]>(Nnum);
+    // auto non_min = std::make_unique<bool[]>(Nnum);
 
-    for (int i = 0; i < (int)A->nrow; ++i) {
+    // each process maintains its own cost_array
+    // the permutation
+    std::unique_ptr<int[]> P(new int[A->nrow]); 
+    // 
+    std::unique_ptr<int[]> f_cost_array(new int[A->nrow]);
+    std::unique_ptr<int[]> g_cost_array(new int[A->nrow]);
+    // jobs (global) column number
+    std::unique_ptr<int[]> part_j(new int[Nnum]);
+    std::unique_ptr<bool[]> non_min(new bool[A->nrow]);
+
+    for (int i = 0; i < (int)A->nrow; i++) {
         P[i] = i;
         f_cost_array[i] = 0;
         g_cost_array[i] = 0;
@@ -292,9 +302,10 @@ void mpi_A_star_amd(int pid, int nproc, cholmod_sparse* A, cholmod_common* cp,
     auto S = cholmod_copy_sparse(A, cp);
     int min_res = INT_MAX;
 
-    auto P_opt = std::make_unique<int[]>(S->nrow);
+    // auto P_opt = std::make_unique<int[]>(S->nrow);
+    std::unique_ptr<int[]> P_opt(new int[S->nrow]);
 
-    for (int i = 0; i < (int)A->nrow - 1; i++) {
+    for (int i = 0; i < (int)A->nrow - 1; i += step) {
         // check if full
         int S_nnz = cholmod_nnz(S, cp);
         if (log_level)
@@ -304,14 +315,15 @@ void mpi_A_star_amd(int pid, int nproc, cholmod_sparse* A, cholmod_common* cp,
             break;
         }
 
-        printf("i=%d pid=%d\n", i, pid);
+        // printf("i=%d pid=%d\n", i, pid);
         
         // at each step, process 0 generates nproc * Nnum random numbers in [0, i]
         // scatters the job to #nproc processes
         int thread_limit = nproc * Nnum;
         int max_child_no = (int)A->nrow - i;
         int jobs_len = std::min(thread_limit, max_child_no);
-        auto send_cts = std::make_unique<int[]>(nproc); // the number of jobs each process takes
+        // auto send_cts = std::make_unique<int[]>(nproc);
+        std::unique_ptr<int[]> send_cts(new int[nproc]); // the number of jobs each process takes
         int stride = jobs_len / nproc;
         int remainder = jobs_len % nproc;
         for (int j = 0; j < nproc; j++) {
@@ -321,7 +333,8 @@ void mpi_A_star_amd(int pid, int nproc, cholmod_sparse* A, cholmod_common* cp,
 #ifndef DEBUG
             srand(time(nullptr));
 #endif
-            auto jobs = std::make_unique<int[]>(jobs_len);
+            // auto jobs = std::make_unique<int[]>(jobs_len);
+            std::unique_ptr<int[]> jobs(new int[jobs_len]);
             if (thread_limit < max_child_no) {
                 // generate random numbers
                 std::unordered_set<int> nums;
@@ -329,33 +342,34 @@ void mpi_A_star_amd(int pid, int nproc, cholmod_sparse* A, cholmod_common* cp,
                     nums.insert(rand() % (max_child_no) + i);
                 }
                 int j = 0;
-                printf("Jobs:");
+                // printf("Jobs:");
                 for (auto num: nums) {
                     jobs[j++] = num;
                 }
             } else {
                 // use [i, A->nrow) directly
-                printf("Jobs_low:");
+                // printf("Jobs_low:");
                 for (int j = 0; j < max_child_no; j++) {
                     jobs[j] = i + j;
                 }
             }
-            for (int k = 0; k < jobs_len; k++) {
-                printf("%d ", jobs[k]);
-            }
-            puts("");
+            // for (int k = 0; k < jobs_len; k++) {
+            //     printf("%d ", jobs[k]);
+            // }
+            // puts("");
 
             // scatter jobs into part_j[]
-            auto displs = std::make_unique<int[]>(nproc);
+            // auto displs = std::make_unique<int[]>(nproc);
+            std::unique_ptr<int[]> displs(new int[nproc]);
             displs[0] = 0;
             for (int j = 1; j < nproc; j++) {
                 displs[j] = displs[j-1] + send_cts[j-1];
             }
-            printf("send_cts(displs): ");
-            for (int k = 0; k < nproc; k++) {
-                printf("%d(%d) ", send_cts[k], displs[k]);
-            }
-            printf("\n");
+            // printf("send_cts(displs): ");
+            // for (int k = 0; k < nproc; k++) {
+            //     printf("%d(%d) ", send_cts[k], displs[k]);
+            // }
+            // printf("\n");
 
             MPI_Scatterv(jobs.get(), send_cts.get(), displs.get(), MPI_INT,
                          part_j.get(), send_cts[pid], MPI_INT, 0, MPI_COMM_WORLD);
@@ -364,7 +378,7 @@ void mpi_A_star_amd(int pid, int nproc, cholmod_sparse* A, cholmod_common* cp,
             MPI_Scatterv(nullptr, nullptr, nullptr, MPI_INT,
                          part_j.get(), send_cts[pid], MPI_INT, 0, MPI_COMM_WORLD);
         }
-        // TODO: test that the jobs are received correctly
+        // TODO: test that jobs are received correctly
         auto print = [&](int now_pid) {
             if (pid == now_pid) {
                 std::cout << "pid=" << pid << ": ";
@@ -375,25 +389,32 @@ void mpi_A_star_amd(int pid, int nproc, cholmod_sparse* A, cholmod_common* cp,
             }
             MPI_Barrier(MPI_COMM_WORLD);
         };
-        for (int i = 0; i < nproc; i++) {
-            print(i);
-        }
+        // for (int i = 0; i < nproc; i++) {
+        //     print(i);
+        // }
 
         // consider each candidate using omp parallel for
-        #pragma omp parallel for
+        #pragma omp parallel for schedule(dynamic, 1)
         // consider each candidate
         // send_cts[pid] is the #jobs assigned to this process
         for (int jj = 0; jj < send_cts[pid]; ++jj) {
             bool diag = false;
             int j = part_j[jj]; // the actual column
 
-            auto Parent = std::make_unique<int[]>(S->nrow);
-            auto Post = std::make_unique<int[]>(S->nrow);
-            auto ColCount = std::make_unique<int[]>(S->nrow);
-            auto First = std::make_unique<int[]>(S->nrow);
-            auto Level = std::make_unique<int[]>(S->nrow);
-            auto P_tmp = std::make_unique<int[]>(S->nrow);
-            auto adjacants = std::make_unique<int[]>(S->nrow);
+            // auto Parent = std::make_unique<int[]>(S->nrow);
+            // auto Post = std::make_unique<int[]>(S->nrow);
+            // auto ColCount = std::make_unique<int[]>(S->nrow);
+            // auto First = std::make_unique<int[]>(S->nrow);
+            // auto Level = std::make_unique<int[]>(S->nrow);
+            // auto P_tmp = std::make_unique<int[]>(S->nrow);
+            // auto adjacants = std::make_unique<int[]>(S->nrow);
+            std::unique_ptr<int[]> Parent(new int[S->nrow]);
+            std::unique_ptr<int[]> Post(new int[S->nrow]);
+            std::unique_ptr<int[]> ColCount(new int[S->nrow]);
+            std::unique_ptr<int[]> First(new int[S->nrow]);
+            std::unique_ptr<int[]> Level(new int[S->nrow]);
+            std::unique_ptr<int[]> P_tmp(new int[S->nrow]);
+            std::unique_ptr<int[]> adjacants(new int[S->nrow]);
 
             cholmod_common c;
             cholmod_start(&c);
@@ -410,13 +431,15 @@ void mpi_A_star_amd(int pid, int nproc, cholmod_sparse* A, cholmod_common* cp,
             // F does not contain column[lid]
             // so we need to add the #nnz of column[lid] to f[j]
             // for a fair comparison
-            if (diag) {
-                f_cost_array[j] += (F_nnz - S_nnz + adj_size + 1);
-            } else {
-                f_cost_array[j] += (F_nnz - S_nnz + adj_size);
-            }
-            if (log_level == 2)
+            // if (diag) {
+            //     f_cost_array[j] += (F_nnz - S_nnz + adj_size + 1);
+            // } else {
+            //     f_cost_array[j] += (F_nnz - S_nnz + adj_size);
+            // }
+            f_cost_array[j] += F_nnz - S_nnz + adj_size + (diag ? 1 : 0);
+            if (log_level == 2) {
                 printf("%d: %d\n", j - i, f_cost_array[j]);
+            }
             g_cost_array[j] = fill_in_amd(F, &c, P_tmp.get(), Parent.get(), Post.get(),
                                           ColCount.get(), First.get(), Level.get(), F_nnz);
             // printf ("g_cost_array: %d\n", g_cost_array[j]) ;
@@ -444,11 +467,11 @@ void mpi_A_star_amd(int pid, int nproc, cholmod_sparse* A, cholmod_common* cp,
             printf("f_score: %d, g_score: %d\n", (int)f_cost_array[min_idx],
                 (int)g_cost_array[min_idx]);
         }
-        printf("Finish evaluating pid=%d min_cost=%d min_idx=%d\n", pid, min_cost, min_idx);
+        // printf("Finish evaluating pid=%d min_cost=%d min_idx=%d\n", pid, min_cost, min_idx);
 
         // gather the result and select the best overall child
         // scatter this information and each node should update its matrix
-        // TODO: try only update the matrix at that node and scatter it to other nodes
+        // TODO: try only update the matrix at that node and scatter it to other nodes?
         Info myInfo, bestInfo;
         myInfo.min_cost = min_cost;
         myInfo.col_no = min_idx;
@@ -456,43 +479,92 @@ void mpi_A_star_amd(int pid, int nproc, cholmod_sparse* A, cholmod_common* cp,
         MPI_Allreduce(&myInfo, &bestInfo, 1, myType, myOp, MPI_COMM_WORLD);
         min_idx = bestInfo.col_no;
         min_cost = bestInfo.min_cost;
-        f_cost_array[min_idx] = bestInfo.f_cost;
-        printf("Reduction finished pid=%d min_cost=%d min_idx=%d\n", pid, min_cost, min_idx);
+        f_cost_array[i] = bestInfo.f_cost;
+        // f_cost_array[min_idx] = bestInfo.f_cost;
+        // printf("Reduction finished pid=%d min_cost=%d min_idx=%d\n", pid, min_cost, min_idx);
 
         // update matrix using bestInfo
         for (int k = min_idx, tmp; k > i; --k) {
             tmp = P[k], P[k] = P[k-1], P[k-1] = tmp;
         }
-
-        for (int k = i; k < (int)A->nrow; ++k) { //TODO: copy all the way up???
-            f_cost_array[k] = f_cost_array[min_idx];
-            // f_cost_array[k] = 0 ;
-        }
-        // TODO: elminate node 
-        auto P_tmp = std::make_unique<int[]>(S->nrow);
-        auto adjacants = std::make_unique<int[]>(S->nrow);
-        int adj_size = 0;
+        // Perform elimination
+        // auto P_tmp = std::make_unique<int[]>(S->nrow);
+        // auto adjacants = std::make_unique<int[]>(S->nrow);
         int lid = min_idx - i;
-
+        std::unique_ptr<int[]> adjacants(new int[S->nrow]);
+        int adj_size = 0;
         auto T = eliminate_node(S, cp, lid, S_nnz, adjacants.get(), adj_size, nullptr, 0);
         cholmod_free_sparse(&S, cp);
         S = T;
 
         memcpy(P_opt.get(), P.get(), (i+1) * sizeof(int));
+        std::unique_ptr<int[]> P_tmp(new int[S->nrow]);
+        int p_tmp_size = S->nrow;
         camd_order(S->nrow, (int*)S->p, (int*)S->i, P_tmp.get(), nullptr, nullptr,
             nullptr);
         // record ordering proposed by amd
         for (int u = i + 1; u < (int)A->ncol; ++u) {
             P_opt[u] = P[P_tmp[u - i - 1] + i + 1];
         }
+        // TODO: apply (step-1) more eliminations suggested by amd
+        if (step < max_child_no) {
+            for (int k = 0; k < step-1; k++) {
+                // printf("Entered danger zone!!!\n");
+                int col_offset = i + k + 1; // col offset in P
+                // need to update f_cost_array, S, P
+                // eliminate P_tmp[k] from S using eliminate_node
+                S_nnz = cholmod_nnz(S, cp);
+                bool diag;
+                adj_size = 0;
+                auto T = eliminate_node(S, cp, P_tmp[k], S_nnz, adjacants.get(), adj_size, &diag, 0);
+                // update f_cost
+                int T_nnz = cholmod_nnz(T, cp);
+                f_cost_array[i] += T_nnz - S_nnz + adj_size + (diag ? 1 : 0);
+                // update P_tmp
+                for (int kk = k + 1; kk < p_tmp_size; kk++) {
+                    if (P_tmp[kk] > P_tmp[k]) {
+                        P_tmp[kk]--;
+                    }
+                }
 
-        if (mpi_all_agree(f_cost_array, A->nrow, pid) && pid == 0) printf("f agrees\n");
-        else if (pid == 0) printf("f does not agree\n");
-        if (mpi_all_agree(P, A->nrow, pid) && pid == 0) printf("P agrees\n");
-        else if (pid == 0) printf("P does not agree\n");
-        if (mpi_all_agree(P_opt, S->nrow, pid) && pid == 0) printf("P_opt agrees\n");
-        else if (pid == 0) printf("P_opt does not agree\n");
-        printf("Finish eliminating node pid=%d\n", pid);
+                cholmod_free_sparse(&S, cp);
+                S = T;
+
+                // std::unique_ptr<int[]> Parent(new int[S->nrow]);
+                // std::unique_ptr<int[]> Post(new int[S->nrow]);
+                // std::unique_ptr<int[]> ColCount(new int[S->nrow]);
+                // std::unique_ptr<int[]> First(new int[S->nrow]);
+                // std::unique_ptr<int[]> Level(new int[S->nrow]);
+                // cholmod_analyze_ordering(S, 1, P_tmp.get()+k+1, nullptr, 0, Parent.get(),
+                //     Post.get(), ColCount.get(), First.get(), Level.get(), cp);
+                // int g_cost = 0;
+                // for (int i = 0; i < T->nrow; i++) {
+                //     g_cost += ColCount[i];
+                // }
+                // g_cost -= T_nnz;
+
+                // update P
+                for (int kk = P_tmp[k] + col_offset, tmp; kk > col_offset; --kk) {
+                    tmp = P[kk], P[kk] = P[kk-1], P[kk-1] = tmp;
+                }
+                // if (f_cost_array[i] + g_cost != min_cost) {
+                //     printf("pid: %d, i: %d, k: %d, f: %d, g: %d\n", pid, i, k, f_cost_array[i], g_cost);
+                //     return;
+                // }
+            }
+            // calculate change in f_cost and add to that?
+            for (int k = i + 1; k < (int)A->nrow; ++k) { //TODO: copy all the way up???
+                f_cost_array[k] = f_cost_array[i];
+            }
+        }
+
+        // if (mpi_all_agree(f_cost_array, A->nrow, pid) && pid == 0) printf("f agrees\n");
+        // else if (pid == 0) printf("f does not agree\n");
+        // if (mpi_all_agree(P, A->nrow, pid) && pid == 0) printf("P agrees\n");
+        // else if (pid == 0) printf("P does not agree\n");
+        // if (mpi_all_agree(P_opt, S->nrow, pid) && pid == 0) printf("P_opt agrees\n");
+        // else if (pid == 0) printf("P_opt does not agree\n");
+        // printf("Finish eliminating node pid=%d\n", pid);
 
         // check for errors
         // TODO: not needed?
@@ -503,10 +575,10 @@ void mpi_A_star_amd(int pid, int nproc, cholmod_sparse* A, cholmod_common* cp,
                         printf("%d ", adjacants[k]);
                     }
                     puts("");
-                    printf("lid: %d\n", lid);
-                    printf("F_nnz: %d\n", cholmod_nnz(S, cp));
-                    puts("dump last matrix");
                 }
+                printf("lid: %d\n", lid);
+                printf("F_nnz: %ld\n", cholmod_nnz(S, cp));
+                puts("dump last matrix");
                 FILE* fp = fopen(
                     std::string("out/Matrix_" + std::to_string(i + 1) + ".txt").c_str(),
                     "w");
@@ -524,7 +596,7 @@ void mpi_A_star_amd(int pid, int nproc, cholmod_sparse* A, cholmod_common* cp,
         if (min_res > min_cost) { // maintain a global min cost
             min_res = min_cost;
         }
-        printf("Finish checking pid=%d\n", pid); MPI_Barrier(MPI_COMM_WORLD);
+        // printf("Finish checking pid=%d\n", pid); MPI_Barrier(MPI_COMM_WORLD);
     }
     // process 0 should set P and all process should clean up and return
     P_result = std::move(P_opt);

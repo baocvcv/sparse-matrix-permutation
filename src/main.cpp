@@ -116,12 +116,18 @@ int main(int argc, char** argv)
         }
     }
 
-    MPI_Barrier(MPI_COMM_WORLD);
-
     // parallel A*
-    puts("[Info] Performing A* search with mpi...");
+    if (pid == 0) {
+        puts("[Info] Performing A* search with mpi...");
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
     std::unique_ptr<int[]> P; // only process 0 keeps the final result
-    mpi_A_star_amd(pid, nproc, A, &c, weight, child_num, P, 0);
+    time_toggle(MPI_COMM_WORLD);
+    mpi_A_star_amd(pid, nproc, A, &c, P, weight, child_num, step, 0);
+    auto para_time = time_toggle(MPI_COMM_WORLD);
+    if (pid == 0) {
+        printf("[Info] Time elapsed is %.4lf seconds.\n", para_time);
+    }
 
     if (pid == 0 && P) {
         verification(A, &c, P.get());
